@@ -25,7 +25,7 @@ export function loadPrecincts(geojson, getStyle = () => ({})) {
     style: getStyle,
     onEachFeature: (feature, layer) => {
       // click + hover behavior
-      layer.on("click", onFeatureClick);
+      layer.on("click", handleMapClick);
       layer.on("mouseover", () => layer.setStyle({ weight: 2 }));
       layer.on("mouseout", () => layer.setStyle({ weight: 0.5 }));
     },
@@ -107,14 +107,19 @@ function styleFn(feature) {
   return { color: "#ffffff", weight: 0.5, fillColor: color, fillOpacity: 0.8 };
 }
 
-export function onFeatureClick(e) {
+function handleMapClick(e) {
   const props = e.target.feature.properties;
-  onClickFeatureCb(props);
+  if (!props.precinct_id && (props.VTDID || props.vtdid)) {
+    props.precinct_id = props.VTDID || props.vtdid;
+  }
+  if (onClickFeatureCb) {
+    onClickFeatureCb(props);
+  }
 }
 
 export function attachFeatureHandlers() {
   precinctLayer.eachLayer((layer) => {
-    layer.on("click", onFeatureClick);
+    layer.on("click", handleMapClick);
     layer.on("mouseover", () => layer.setStyle({ weight: 2 }));
     layer.on("mouseout", () => layer.setStyle({ weight: 0.5 }));
   });

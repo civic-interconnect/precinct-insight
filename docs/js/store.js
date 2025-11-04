@@ -1,34 +1,133 @@
-// docs/js/store.js
+// docs/js/store.js 
 
-let geo = [];
+let geo = null; // Changed from [] to null for clarity
 let rows = [];
 let byPrecinctYearOffice = new Map();
 let metaById = new Map();
 
+// Add loading status tracking
+let loadingStatus = {
+  geo: false,
+  elections: false,
+  error: null
+};
+
 export async function loadData() {
   console.log("[store] Starting loadData()");
+  
+  try {
+    // Load GeoJSON with timeout and progress tracking
+    await loadGeoJSON();
+    
+    // Load election data in parallel
+    await loadElectionData();
+    
+    // Build indexes
+    buildIndex();
+    buildMeta();
+    publishColorScale();
+    
+    console.log("[store] All data loaded successfully");
+    console.log(`[store] Total features: ${geo?.features?.length || 0}`);
+    console.log(`[store] Total election rows: ${rows.length}`);
+    
+  } catch (error) {
+    console.error("[store] Error loading data:", error);
+    loadingStatus.error = error;
+    throw error;
+  }
+}
+
+async function loadGeoJSON() {
   console.log("[store] Fetching precinct GeoJSON...");
+  loadingStatus.geo = false;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  
+  try {
+    const response = await fetch("./data/mn-precincts-web.geojson", {
+      signal: controller.signal
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to load GeoJSON: ${response.status} ${response.statusText}`);
+    }
+    
+    // Check content length
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const sizeMB = (parseInt(contentLength) / 1024 / 1024).toFixed(2);
+      console.log(`[store] GeoJSON size: ${sizeMB} MB`);
+      
+      // Warn if file is very large
+      if (parseInt(contentLength) > 20 * 1024 * 1024) {
+        console.warn("[store] ⚠️ Large GeoJSON file detected. Consider using simplified geometries.");
+      }
+    }
+    
+    // Parse JSON with error handling
+    const text = await response.text();
+    console.log(`[store] Downloaded ${(text.length / 1024 / 1024).toFixed(2)} MB of text`);
+    
+    console.log("[store] Parsing GeoJSON...");
+    geo = JSON.parse(text);
+    
+    // Validate GeoJSON structure
+    if (!geo || !geo.features || !Array.isArray(geo.features)) {
+      throw new Error("Invalid GeoJSON structure");
+    }
+    
+    console.log(`[store] ✅ GeoJSON loaded: ${geo.features.length} features`);
+    
+    // Add indices to features for faster lookups
+    geo.features.forEach((feature, idx) => {
+      if (feature.properties) {
+        feature.properties._index = idx;
+      }
+    });
+    
+    loadingStatus.geo = true;
+    
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('GeoJSON loading timeout - file may be too large');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
-  // verify paths are correct relative to docs/
+async function loadElectionData() {
+  console.log("[store] Loading election data...");
+  loadingStatus.elections = false;
   
-
-  geo = await fetch("./data/mn-precincts-web.geojson").then((r) => r.json());
-  console.log("[store] Precinct GeoJSON loaded.");
-  
-  const r2022 = await fetch("./data/election_results_2022.csv")
-    .then((r) => r.text())
-    .then(csvToRows);
-  
-  const r2024 = await fetch("./data/election_results_2024.csv")
-    .then((r) => r.text())
-    .then(csvToRows);
-  
-  rows = r2022.concat(r2024);
-
-  buildIndex();
-  buildMeta(); // derive meta from latest year where available
-  publishColorScale();
-  console.log("[store] Election data loaded.");
+  try {
+    // Load both years in parallel
+    const [r2022, r2024] = await Promise.all([
+      fetch("./data/election_results_2022.csv")
+        .then(r => {
+          if (!r.ok) throw new Error(`Failed to load 2022 data: ${r.status}`);
+          return r.text();
+        })
+        .then(csvToRows),
+      fetch("./data/election_results_2024.csv")
+        .then(r => {
+          if (!r.ok) throw new Error(`Failed to load 2024 data: ${r.status}`);
+          return r.text();
+        })
+        .then(csvToRows)
+    ]);
+    
+    rows = r2022.concat(r2024);
+    console.log(`[store] ✅ Election data loaded: ${rows.length} rows`);
+    loadingStatus.elections = true;
+    
+  } catch (error) {
+    console.error("[store] Error loading election data:", error);
+    throw error;
+  }
 }
 
 function csvToRows(text) {
@@ -53,12 +152,14 @@ function splitCSV(line) {
 }
 
 function buildIndex() {
+  console.log("[store] Building indices...");
   byPrecinctYearOffice.clear();
   for (const r of rows) {
     const key = r.precinct_id + "|" + r.year + "|" + r.office;
     if (!byPrecinctYearOffice.has(key)) byPrecinctYearOffice.set(key, []);
     byPrecinctYearOffice.get(key).push(r);
   }
+  console.log(`[store] Indexed ${byPrecinctYearOffice.size} precinct-year-office combinations`);
 }
 
 function buildMeta() {
@@ -75,6 +176,7 @@ function buildMeta() {
       });
     }
   }
+  console.log(`[store] Built metadata for ${metaById.size} precincts`);
 }
 
 export function years() {
@@ -86,7 +188,8 @@ export function offices() {
 }
 
 export function counties() {
-  const set = new Set(geo.features.map((f) => f.properties.county));
+  if (!geo || !geo.features) return [];
+  const set = new Set(geo.features.map((f) => f.properties?.county).filter(Boolean));
   return Array.from(set).sort();
 }
 
@@ -94,12 +197,16 @@ export function getMNSenateDistricts() {
   if (!geo || !geo.features) return [];
   const s = new Set();
   for (const f of geo.features) {
-    const v =
-      f.properties &&
-      (f.properties.mn_senate ||
-        f.properties.MNSENDIST ||
-        f.properties.mn_senate_district);
-    if (v != null && String(v).trim()) s.add(String(v).trim());
+    // Check multiple possible field names
+    const v = f.properties && (
+      f.properties.mn_senate ||
+      f.properties.MNSENDIST ||
+      f.properties.mn_senate_district ||
+      f.properties.senate_district
+    );
+    if (v != null && String(v).trim()) {
+      s.add(String(v).trim());
+    }
   }
   return Array.from(s).sort((a, b) =>
     a.localeCompare(b, "en", { numeric: true })
@@ -110,8 +217,16 @@ export function getMNHouseDistricts() {
   if (!geo || !geo.features) return [];
   const s = new Set();
   for (const f of geo.features) {
-    const v = f.properties && f.properties.mn_house; // your field
-    if (v != null && String(v).trim()) s.add(String(v).trim());
+    // Check multiple possible field names
+    const v = f.properties && (
+      f.properties.mn_house ||
+      f.properties.MNLEGDIST ||
+      f.properties.mn_house_district ||
+      f.properties.house_district
+    );
+    if (v != null && String(v).trim()) {
+      s.add(String(v).trim());
+    }
   }
   return Array.from(s).sort((a, b) =>
     a.localeCompare(b, "en", { numeric: true })
@@ -121,14 +236,14 @@ export function getMNHouseDistricts() {
 export function getKPIsForPrecinct(pid, year, office) {
   const key = pid + "|" + year + "|" + office;
   const arr = byPrecinctYearOffice.get(key) || [];
-  let dem = 0,
-    rep = 0,
-    oth = 0;
+  let dem = 0, rep = 0, oth = 0;
+  
   for (const r of arr) {
     if (r.party === "DEM") dem += r.votes;
     else if (r.party === "REP") rep += r.votes;
     else oth += r.votes;
   }
+  
   const total = dem + rep + oth;
   const meta = metaById.get(pid) || {
     county: "",
@@ -138,6 +253,7 @@ export function getKPIsForPrecinct(pid, year, office) {
   };
   const reg = meta.registered || 0;
   const turnoutPct = reg ? (total / reg) * 100 : 0;
+  
   return {
     precinct_id: pid,
     precinct_name: meta.precinct_name,
@@ -154,10 +270,10 @@ export function getKPIsForPrecinct(pid, year, office) {
 }
 
 export function findPrecinctByName(q) {
-  if (!q || q.length < 2) return null;
+  if (!q || q.length < 2 || !geo || !geo.features) return null;
   const norm = q.toLowerCase();
   for (const f of geo.features) {
-    const nm = (f.properties.name || "").toLowerCase();
+    const nm = (f.properties?.name || f.properties?.precinct_name || "").toLowerCase();
     if (nm.includes(norm)) return f.properties;
   }
   return null;
@@ -201,6 +317,11 @@ function numericToColor(v, metric) {
 function publishColorScale() {
   window.__getColorScale = (year, office, metric) =>
     colorScaleFactory(year, office, metric);
+}
+
+// Export loading status for debugging
+export function getLoadingStatus() {
+  return loadingStatus;
 }
 
 export { geo };

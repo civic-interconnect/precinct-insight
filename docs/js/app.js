@@ -6,7 +6,6 @@ import {
   fitToCounty,
   initMap,
   loadPrecincts,
-  onFeatureClick,
   setChoropleth,
 } from "./map.js";
 import {
@@ -22,8 +21,8 @@ import {
 } from "./controllers.js";
 
 
-function onClickFeature(props) {
-  appState.selectedPrecinctId = props.precinct_id;
+function handlePrecinctClick(props) {  
+  appState.setSelectedPrecinctId(props.precinct_id);
   renderDetails();
 }
 
@@ -187,7 +186,7 @@ async function main() {
   console.log("Filters initialized.");
 
   // 3. Initialize the map and load precinct polygons
-  initMap(onClickFeature);
+  initMap(handlePrecinctClick);
   loadPrecincts(geo);
   console.log("Map initialized.");
 
@@ -222,8 +221,8 @@ async function main() {
   // --- Default: Office + Metric ---
   officeSelect.value = "POTUS";
   appState.setOffice("POTUS");
-  metricSelect.value = "turnout_pct";
-  appState.setMetric("turnout_pct");
+  metricSelect.value = "margin"; // or "turnout_pct", "dem_share", "gop_share", or "margin"
+  appState.setMetric("margin");
 
   // --- Default: County ---
   for (const opt of countySelect.options) {
