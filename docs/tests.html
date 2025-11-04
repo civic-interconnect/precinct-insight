@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Precinct Insight Tests</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body {
+            font-family: system-ui, Arial, sans-serif;
+            margin: 16px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+        }
+
+        #meta {
+            color: #555;
+            margin-bottom: 16px;
+        }
+
+        .ok {
+            color: #0a0;
+        }
+
+        .fail {
+            color: #c00;
+        }
+
+        pre {
+            background: #f6f8fa;
+            padding: 8px;
+            border: 1px solid #eee;
+            overflow: auto;
+        }
+
+        table {
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        td,
+        th {
+            border: 1px solid #ddd;
+            padding: 4px 8px;
+        }
+
+        .muted {
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Precinct Insight: Browser Tests</h1>
+    <div id="meta" class="muted">Loads real data and verifies basic invariants.</div>
+
+    <button id="run-btn">Run Tests</button>
+    <div id="summary"></div>
+    <div id="report"></div>
+
+    <script type="module">
+        import { loadUiConfig } from "./js/ui-config.js";
+        import {
+            loadData, years, offices, counties,
+            getMNSenateDistricts, getMNHouseDistricts,
+            getKPIsForPrecinct, geo
+        } from "./js/store.js";
+
+        // Minimal test harness
+        const results = [];
+        function assert(cond, msg, ctx) {
+            if (cond) results.push({ ok: true, msg });
+            else {
+                results.push({ ok: false, msg, ctx: ctx ?? null });
+                console.error("FAIL:", msg, ctx ?? "");
+            }
+        }
+        function section(title) {
+            results.push({ section: title });
+        }
+        function pick(arr) { return Array.isArray(arr) && arr.length ? arr[0] : null; }
+
+        async function runTests() {
+            results.length = 0;
+            const started = Date.now();
+
+            section("Load UI Config");
+            const uiConfig = await loadUiConfig();
+            assert(uiConfig && typeof uiConfig === "object", "UI config loaded", uiConfig);
+
+            section("Load Data");
+            await loadData();
+            assert(geo && geo.type === "FeatureCollection", "GeoJSON loaded");
+            assert(geo.features && geo.features.length > 0, "GeoJSON has features", { count: geo.features?.length });
+
+            section("Catalogs");
+            const ys = years();
+            const ofs = offices();
+            const cts = counties();
+            assert(ys.length >= 1, "years() non-empty", ys);
+            assert(ofs.includes("POTUS") || ofs.length >= 1, "offices() has entries", ofs);
+            assert(cts.length > 0, "counties() non-empty", cts.slice(0, 10));
+
+            section("District Lists");
+            const sen = getMNSenateDistricts();
+            const house = getMNHouseDistricts();
+            assert(Array.isArray(sen), "getMNSenateDistricts returns array");
+            assert(Array.isArray(house), "getMNHouseDistricts returns array");
+            assert(sen.length > 0 || house.length > 0, "At least one district list non-empty", { sen_len: sen.length, house_len: house.length });
+
+            section("Feature Props Sanity");
+            const f0 = pick(geo.features);
+            const props = f0?.properties || {};
+            const pid = props.precinct_id || props.VTDID || props.vtdid;
+            assert(Boolean(pid), "Feature has precinct id", props);
+
+            section("KPIs");
+            const yTry = ys.includes(2024) ? 2024 : ys[ys.length - 1];
+            const officeTry = ofs.includes("POTUS") ? "POTUS" : ofs[0];
+            const k = getKPIsForPrecinct(pid, yTry, officeTry);
+            assert(k && typeof k === "object", "getKPIsForPrecinct returns object");
+            assert(typeof k.turnout_pct === "number", "KPI has turnout_pct");
+            assert(typeof k.dem_share === "number", "KPI has dem_share");
+            assert(typeof k.gop_share === "number", "KPI has gop_share");
+            assert(typeof k.margin === "number", "KPI has margin");
+
+            // basic invariants
+            assert(k.dem >= 0 && k.gop >= 0 && k.oth >= 0, "Votes non-negative", { dem: k.dem, gop: k.gop, oth: k.oth });
+            const shares = k.dem_share + k.gop_share;
+            assert(shares <= 100 + 0.001, "DEM+GOP share <= 100%", { shares });
+
+            const ms = Date.now() - started;
+            render(results, ms);
+        }
+
+        function render(results, ms) {
+            const report = document.getElementById("report");
+            const summary = document.getElementById("summary");
+            const fails = results.filter(r => r.ok === false);
+            const oks = results.filter(r => r.ok === true);
+
+            summary.innerHTML = `
+        <p><strong>${oks.length} passed</strong>, <strong class="${fails.length ? "fail" : "ok"}">${fails.length} failed</strong> in ${ms} ms.</p>
+      `;
+
+            const parts = [];
+            let currentSection = null;
+            for (const r of results) {
+                if (r.section) {
+                    currentSection = document.createElement("h3");
+                    currentSection.textContent = r.section;
+                    parts.push(currentSection);
+                    continue;
+                }
+                const p = document.createElement("div");
+                p.className = r.ok ? "ok" : "fail";
+                p.textContent = (r.ok ? "PASS: " : "FAIL: ") + r.msg;
+                parts.push(p);
+                if (!r.ok && r.ctx) {
+                    const pre = document.createElement("pre");
+                    pre.textContent = JSON.stringify(r.ctx, null, 2);
+                    parts.push(pre);
+                }
+            }
+            report.replaceChildren(...parts);
+        }
+
+        document.getElementById("run-btn").addEventListener("click", () => {
+            runTests().catch(err => {
+                console.error(err);
+                document.getElementById("summary").innerHTML = '<p class="fail">Test runner crashed. See console.</p>';
+            });
+        });
+
+        // Auto-run once on load
+        runTests().catch(err => console.error(err));
+    </script>
+</body>
+
+</html>

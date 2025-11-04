@@ -1,0 +1,47 @@
+/* =========================
+   ci-footer.css
+   ========================= */
+
+/* Define default CSS variables */
+:host {
+  --footer-bg-color: #eee;
+  --footer-text-color: #222;
+  --footer-link-color: var(--color-light-blue, #007acc);
+  --footer-link-hover-color: var(--color-light-blue-hover, #005fa3);
+  --footer-bg-color-dark: var(--color-blue, #002b55);
+  --footer-text-color-dark: #e0e0e0;
+  --footer-link-color-dark: #7dc9ff;
+
+  display: block;
+  margin-top: 2em;
+  padding: 1em;
+  background-color: var(--footer-bg-color);
+  color: var(--footer-text-color);
+  text-align: center;
+  font-family: "Roboto", sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+/* Scoped link styles for inner anchors */
+a {
+  color: var(--footer-link-color);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--footer-link-hover-color);
+  text-decoration: underline;
+}
+
+/* ==================================================
+   THEME: DARK MODE
+   ================================================== */
+:host-context(body[data-theme="dark"]) {
+  background-color: var(--footer-bg-color-dark);
+  color: var(--footer-text-color-dark);
+}
+
+:host-context(body[data-theme="dark"]) a {
+  color: var(--footer-link-color-dark);
+}

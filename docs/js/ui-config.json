@@ -1,0 +1,13 @@
+{
+  "filtering": {
+    "mode": "scoped",
+    "precedence": ["county", "mn_senate", "mn_house"],
+    "auto_select_children": true,
+    "preserve_child_if_still_valid": true
+  },
+  "fields": {
+    "county": "county",
+    "senate": "mn_senate",
+    "house": "mn_house"
+  }
+}

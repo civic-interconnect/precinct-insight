@@ -1,0 +1,17 @@
+{
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "knip": "^5.67.1"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint-fix": "eslint . --fix",
+    "find-unused": "knip"
+  },
+  "type": "module",
+  "dependencies": {
+    "npm-check-updates": "^19.1.2"
+  }
+}
